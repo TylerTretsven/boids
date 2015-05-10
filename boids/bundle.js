@@ -1,4 +1,349 @@
 (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
+/**
+ * Boids Simulation
+ *
+ * Author: Tyler Tretsven
+ * */
+
+'use strict';
+
+var Boids = require('./boids');
+var _ = require('underscore');
+
+/**
+ * Simulation Class
+ */
+var Simulation = function(options) {
+
+  var config = {
+
+    // Default canvas size
+    height: 150,
+    width: 300,
+
+    // Number of Boids
+    boidCount: 100,
+
+    // Simulation variables
+    // TODO: Be more specific
+    safeDistance: 10,
+    maxVelocity: 20,
+    percentToCenter: 1/8.0,
+    borderBuffer: 10,
+    velocityAdded: 1/8.0
+  };
+
+
+  // Extends the config options
+  _.each(options, function(val, key){
+    if (config[key]) {
+      config[key] = val;
+    }
+  });
+
+  var boids = new Boids(config);
+
+
+
+  /**
+   * Starts the simulation
+   * */
+  this.start = function() {
+    console.log('started');
+    return this;
+  };
+
+  /**
+   * Stops the simulation
+   * */
+  this.stop = function() {
+    console.log('stopped');
+    return this;
+  };
+
+  /**
+   * Initializes and starts a new simulation
+   * */
+  this.reset = function() {
+    console.log('reset');
+    return this;
+  };
+
+  this.viewConfig = function() {
+    console.log( JSON.stringify(config) );
+  };
+
+  // Returns the Simulation object for chaining
+  return this;
+};
+
+
+/**
+ * Demo using a 100% x 100% canvas
+ * */
+
+var c = document.getElementById('canvas');
+
+var options = {
+  height: c.scrollHeight,
+  width:  c.scrollWidth
+};
+
+// Initialize and start a new simulation
+var sim = new Simulation(options).start();
+},{"./boids":2,"underscore":4}],2:[function(require,module,exports){
+'use strict';
+
+var Point = require('./point');
+var _ = require('underscore');
+
+
+/**
+ * Boid Class
+ * */
+var Boid = function(position, velocity) {
+  this.location = position || new Point();
+  this.velocity = velocity || new Point();
+};
+
+
+/**
+ * Boids class
+ */
+var Boids = function(config) {
+
+  var boidList = createBoids();
+
+
+  function next() {
+    _.each(boidList, move);
+  }
+
+
+  /**
+   * Moves a boid to its next location
+   * */
+  function move(b) {
+
+    // Finds the movement vectors
+    var center = centerOfMass(b);
+    var safe = safeDistance(b);
+    var vel = velocity(b);
+
+
+  }
+
+
+  /**
+   * Creates an array of boids at random locations on the canvas*/
+  function createBoids() {
+
+    // Array of new random boids
+    var newBoidList = [];
+
+    _.each( _.range(config.boidCount), function(val, i) {
+
+      // Generate random x and y coordinates
+      var x = Math.random() * config.width;
+      var y = Math.random() * config.height;
+
+      var p = new Point(x, y);
+
+      newBoidList[i] = new Boid(p);
+    });
+
+    return newBoidList;
+  }
+
+
+  /**
+   * Web workers
+   * */
+  function spawnWorker(file) {
+    if (!!window.Worker) {
+
+      var worker = new Worker(file);
+
+      return function(boidIndex, boidArray) {
+
+        var result;
+
+        worker.onmessage = function(e) {
+          console.log(e.data);
+        };
+
+        worker.postMessage({
+          boidIndex: boidIndex,
+          boidArray: boidArray
+        });
+
+      }
+    }
+  }
+
+  var testWorker = spawnWorker('/workers/test.js');
+
+  testWorker(3, [4,5,6])
+
+};
+
+module.exports = Boids;
+
+
+
+
+},{"./point":3,"underscore":4}],3:[function(require,module,exports){
+'use strict';
+
+var _ = require('underscore');
+
+/**
+ * Point class
+ */
+var Point = function(x, y) {
+
+  this.x = x || 0;
+  this.y = y || 0;
+
+
+  /**
+  * Adds one or many vectors to a point
+  * */
+  this.add = function() {
+
+    // Initialize a point at (0, 0)
+    var sum = {x:0, y: 0};
+
+    // For Each point, increment sum.x and sum.y
+    _.each(arguments, function(p) {
+      sum.x += p.x;
+      sum.y += p.y;
+    });
+
+    // Add the sum to the point
+    this.x += sum.x;
+    this.y += sum.y;
+
+    // Return this for chaining
+    return this;
+  };
+
+
+  /**
+  * Subtracts one or many vectors from a point
+  */
+  this.subtract = function() {
+
+    // Initialize a new Point at (0, 0)
+    var diff = {x:0, y: 0};
+
+    // Sum up all of the vectors
+    _.each(arguments, function(p) {
+      diff.x += p.x;
+      diff.y += p.y;
+    });
+
+    // Return the Subtract that sum from the point
+    this.x -= sum.x;
+    this.y -= sum.y;
+
+    // Return this for chaining
+    return this;
+  };
+
+
+  /**
+  * Multiplies the point by another point's coordinates
+  */
+  this.multiply = function(otherPoint) {
+
+    // Multiply each coordinate by the other point's coordinate
+    this.x *= otherPoint.x;
+    this.y *= otherPoint.y;
+
+    // Return this for chaining
+    return this;
+  };
+
+
+  /**
+  * Multiplies the point's coordinates by a scalar variable
+  */
+  this.multiplyBy = function(scalar) {
+
+    // Multiply each coordinate by the scalar
+    this.x *= scalar;
+    this.y *= scalar;
+
+    // Return this for chaining
+    return this;
+  };
+
+
+  /**
+  * Divides the point's coordinates by another point's coordinates
+  */
+  this.divide = function(otherPoint) {
+    // TODO: Make sure that neither of the divisors are 0
+
+    // Divide each coordinate by the other point's coordinate
+    this.x /= otherPoint.x;
+    this.y /= otherPoint.y;
+
+    // Return this for chaining
+    return this;
+  };
+
+
+  /**
+  * Divides the point's coordinates by a scalar variable
+  */
+  this.divideBy = function(scalar) {
+
+    if (scalar != 0) {
+
+      // Divide each coordinate by the scalar
+      this.x /= scalar;
+      this.y /= scalar;
+    } else {
+      // TODO: Come up with a condition if the scalar is 0
+    }
+
+    // Return this for chaining
+    return this;
+  };
+
+
+  /**
+  * Multiplies the point by another point's coordinates
+  */
+  this.multiply = function(otherPoint) {
+
+    // Multiply each coordinate by the other point's coordinate
+    this.x *= otherPoint.x;
+    this.y *= otherPoint.y;
+
+    // Return this for chaining
+    return this;
+  };
+
+
+  /**
+  * Multiplies the point's coordinates by a scalar variable
+  */
+  this.multiplyBy = function(scalar) {
+
+    // Multiply each coordinate by the scalar
+    this.x *= scalar;
+    this.y *= scalar;
+
+    // Return this for chaining
+    return this;
+  };
+};
+
+module.exports = Point;
+},{"underscore":4}],4:[function(require,module,exports){
 //     Underscore.js 1.8.3
 //     http://underscorejs.org
 //     (c) 2009-2015 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors
@@ -1538,7 +1883,7 @@
   // that may not enforce next-turn semantics on modules. Even though general
   // practice for AMD registration is to be anonymous, underscore registers
   // as a named module because, like jQuery, it is a base library that is
-  // popular enough to be bundled in a third party src, but not be part of
+  // popular enough to be bundled in a third party lib, but not be part of
   // an AMD load request. Those cases could generate an error when an
   // anonymous define() is called outside of a loader request.
   if (typeof define === 'function' && define.amd) {
@@ -1548,244 +1893,4 @@
   }
 }.call(this));
 
-},{}],2:[function(require,module,exports){
-'use strict';
-
-var Point = require('./point');
-var _ = require('underscore');
-
-/**
- * Boid Class
- * */
-var Boid = function(position, velocity) {
-  this.location = position || new Point();
-  this.velocity = velocity || new Point();
-};
-
-/**
- * Boids class
- */
-var Boids = function(config) {
-
-  var boidList = createBoids();
-
-  function createBoids() {
-
-    // Array of new random boids
-    var newBoidList = [];
-
-    _.each( _.range(config.boidCount), function(val, i) {
-
-      // Generate random x and y coordinates
-      var x = Math.random() * 1000;
-      var y = Math.random() * 1000;
-
-      var p = new Point(x, y);
-
-      newBoidList[i] = new Boid(p);
-    });
-
-    return newBoidList;
-  }
-
-  console.log(boidList);
-};
-
-module.exports = Boids;
-
-
-
-
-},{"./point":3,"underscore":1}],3:[function(require,module,exports){
-'use strict';
-
-var _ = require('underscore');
-
-/**
- * Point class
- */
-var Point = function(x, y) {
-
-  this.x = x || 0;
-  this.y = y || 0;
-
-  //
-  ///**
-  // * Adds one or many vectors to a point
-  // * */
-  //self.add = function() {
-  //
-  //  // Initialize a point at (0, 0)
-  //  var sum = {x:0, y: 0};
-  //
-  //  // For Each point, increment sum.x and sum.y
-  //  _.each(arguments, function(p) {
-  //    sum.x += p.x;
-  //    sum.y += p.y;
-  //  });
-  //
-  //  // Add the sum to the point
-  //  self.x += sum.x;
-  //  self.y += sum.y;
-  //
-  //  // Return this for chaining
-  //  return this;
-  //};
-  //
-  //
-  ///**
-  // * Subtracts one or many vectors from a point
-  // */
-  //self.subtract = function() {
-  //
-  //  // Initialize a new Point at (0, 0)
-  //  var diff = {x:0, y: 0};
-  //
-  //  // Sum up all of the vectors
-  //  _.each(arguments, function(p) {
-  //    diff.x += p.x;
-  //    diff.y += p.y;
-  //  });
-  //
-  //  // Return the Subtract that sum from the point
-  //  self.x -= sum.x;
-  //  self.y -= sum.y;
-  //
-  //  // Return this for chaining
-  //  return this;
-  //};
-  //
-  //
-  ///**
-  // * Multiplies the point by another point's coordinates
-  // */
-  //self.multiply = function(otherPoint) {
-  //
-  //  // Multiply each coordinate by the other point's coordinate
-  //  self.x *= otherPoint.x;
-  //  self.y *= otherPoint.y;
-  //
-  //  // Return this for chaining
-  //  return this;
-  //};
-  //
-  //
-  ///**
-  // * Multiplies the point's coordinates by a scalar variable
-  // */
-  //self.multiplyBy = function(scalar) {
-  //
-  //  // Multiply each coordinate by the scalar
-  //  self.x *= scalar;
-  //  self.y *= scalar;
-  //
-  //  // Return this for chaining
-  //  return this;
-  //};
-  //
-  //
-  ///**
-  // * Divides the point's coordinates by another point's coordinates
-  // */
-  //self.divide = function(otherPoint) {
-  //  // TODO: Make sure that neither of the divisors are 0
-  //
-  //  // Divide each coordinate by the other point's coordinate
-  //  self.x /= otherPoint.x;
-  //  self.y /= otherPoint.y;
-  //
-  //  // Return this for chaining
-  //  return this;
-  //};
-  //
-  //
-  ///**
-  // * Divides the point's coordinates by a scalar variable
-  // */
-  //self.divideBy = function(scalar) {
-  //
-  //  if (scalar != 0) {
-  //
-  //    // Divide each coordinate by the scalar
-  //    self.x /= scalar;
-  //    self.y /= scalar;
-  //  } else {
-  //    // TODO: Come up with a condition if the scalar is 0
-  //  }
-  //
-  //  // Return this for chaining
-  //  return this;
-  //};
-  //
-  //
-  ///**
-  // * Multiplies the point by another point's coordinates
-  // */
-  //self.multiply = function(otherPoint) {
-  //
-  //  // Multiply each coordinate by the other point's coordinate
-  //  self.x *= otherPoint.x;
-  //  self.y *= otherPoint.y;
-  //
-  //  // Return this for chaining
-  //  return this;
-  //};
-  //
-  //
-  ///**
-  // * Multiplies the point's coordinates by a scalar variable
-  // */
-  //self.multiplyBy = function(scalar) {
-  //
-  //  // Multiply each coordinate by the scalar
-  //  self.x *= scalar;
-  //  self.y *= scalar;
-  //
-  //  // Return this for chaining
-  //  return this;
-  //};
-};
-
-module.exports = Point;
-},{"underscore":1}],4:[function(require,module,exports){
-/**
- * Boids Simulation
- *
- * Author: Tyler Tretsven
- * */
-
-'use strict';
-
-var Boids = require('./boids');
-var _ = require('underscore');
-
-/**
- * Simulation Class
- */
-var Simulation = function(options) {
-
-  var config = {
-    height: window.innerHeight,
-    width: window.innerWidth,
-    boidCount: 100,
-    safeDistance: 10,
-    maxVelocity: 20,
-    percentToCenter: 1/8.0,
-    borderBuffer: 10,
-    velocityAdded: 1/8.0
-  };
-
-  // Extends the config options
-  _.each(options, function(val, key){
-    if (config[key]) {
-      config[key] = val;
-    }
-  });
-
-  var boids = new Boids(config);
-
-
-};
-
-var simulation = new Simulation();
-},{"./boids":2,"underscore":1}]},{},[4]);
+},{}]},{},[1]);
