@@ -16,14 +16,14 @@ var Simulation = function(canvasId, options) {
 
   // Store a reference to the canvas element
   var cvs = document.getElementById(canvasId);
-  var c = canvas.getContext('2d');
+  var ctx = cvs.getContext('2d');
 
   // Configuration elements
   var config = {
 
     // Canvas size
-    height: cvs.scrollHeight,
-    width:  cvs.scrollWidth,
+    height: cvs.height,
+    width: cvs.width,
 
     // Number of Boids
     boidCount: 100,
@@ -45,15 +45,27 @@ var Simulation = function(canvasId, options) {
     }
   });
 
-  var boids = new Boids(config);
-
-
+  var
+    boids = new Boids(config),
+    running = true,
+    iterations = 0;
 
   /**
    * Draws the next frame of the simulation
    * */
-  function draw() {
-    var currentBoids = boids.advance();
+  function draw(list) {
+
+    // Hackey way to clear the canvas
+    ctx.clearRect(0, 0, config.width, config.height);
+
+    // makes boids dark grey
+    ctx.fillStyle = 'black';
+
+    // For each boid, draw a square in its location
+    _.each(list, function(b) {
+
+      ctx.fillRect(b.location.x, b.location.y, 3, 3);
+    });
   }
 
 
@@ -62,29 +74,47 @@ var Simulation = function(canvasId, options) {
    * */
   this.start = function() {
     console.log('started');
-    return this;
+
+    while(running) {
+      ++iterations;
+      if (iterations % 5 === 0) {
+
+        // Every 5th iteration, return the boid list and draw its contents
+       draw( boids.returnNext() );
+
+      } else {
+
+        // Otherwise, just advance the simulation
+        boids.next();
+      }
+
+      // stops after 100 iterations, for testing
+      if (iterations === 100) {
+        running = false;
+      }
+    }
   };
 
   /**
-   * Stops the simulation
+   * FUTURE: Stops the simulation
    * */
-  this.stop = function() {
-    console.log('stopped');
-    return this;
-  };
+  //this.stop = function() {
+  //  console.log('stopped');
+  //  return this;
+  //};
 
   /**
-   * Initializes and starts a new simulation
+   * FUTURE: Initializes and starts a new simulation
    * */
-  this.reset = function() {
-
-    this.stop();
-    var boids = new Boids(config);
-    this.start();
-
-    console.log('reset');
-    return this;
-  };
+  //this.reset = function() {
+  //
+  //  this.stop();
+  //  var boids = new Boids(config);
+  //  this.start();
+  //
+  //  console.log('reset');
+  //  return this;
+  //};
 
   this.viewConfig = function() {
     console.log( JSON.stringify(config) );
@@ -96,10 +126,9 @@ var Simulation = function(canvasId, options) {
 
 
 /**
- * Demo using a 100% x 100% canvas
+ * Demo using a 600 x 600 canvas
  * */
 
-var c = document.getElementById('canvas');
 
 var options = {
 

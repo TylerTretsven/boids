@@ -16,12 +16,12 @@ var Point = function(x, y) {
 /**
  * Utility Library for vector geometry
  */
-var Vector = function() {
+var Vector = {
 
   /**
   * Adds one or many vectors to a point
   * */
-  this.add = function() {
+  add: function() {
 
     // Initialize a point at (0, 0)
     var sum = {x:0, y: 0};
@@ -34,13 +34,13 @@ var Vector = function() {
 
     // Return the sum
     return sum;
-  };
+  },
 
 
   /**
   * Subtracts one or many vectors from a point
   */
-  this.subtract = function(point) {
+  subtract: function(point) {
 
     // Store an initial point, or initialize a new Point at (0, 0)
     if (!point) point = new Point();
@@ -54,39 +54,39 @@ var Vector = function() {
     });
 
     return point;
-  };
+  },
 
 
   /**
   * Multiplies the point by another point's coordinates
   */
-  this.multiply = function(p1, p2) {
+  multiply: function(p1, p2) {
 
     // Multiply each coordinate by the other point's coordinate
     p1.x *= p2.x;
     p1.y *= p2.y;
 
     return p1;
-  };
+  },
 
 
   /**
   * Multiplies the point's coordinates by a scalar variable
   */
-  this.multiplyBy = function(point, scalar) {
+  multiplyBy: function(point, scalar) {
 
     // Multiply each coordinate by the scalar
     point.x *= scalar;
     point.y *= scalar;
 
     return point;
-  };
+  },
 
 
   /**
   * Divides the point's coordinates by another point's coordinates
   */
-  this.divide = function(p1, p2) {
+  divide: function(p1, p2) {
     // TODO: Make sure that neither of the divisors are 0
 
     // Divide each coordinate by the other point's coordinate
@@ -94,13 +94,13 @@ var Vector = function() {
     p1.y /= p2.y;
 
     return p1;
-  };
+  },
 
 
   /**
   * Divides the point's coordinates by a scalar variable
   */
-  this.divideBy = function(point, scalar) {
+  divideBy: function(point, scalar) {
 
     if (scalar != 0) {
 
@@ -113,39 +113,13 @@ var Vector = function() {
     }
 
     return point;
-  };
-
-
-  /**
-  * Multiplies the point by another point's coordinates
-  */
-  this.multiply = function(p1, p2) {
-
-    // Multiply each coordinate by the other point's coordinate
-    p1.x *= p2.x;
-    p1.y *= p2.y;
-
-    return p1;
-  };
-
-
-  /**
-  * Multiplies the point's coordinates by a scalar variable
-  */
-  this.multiplyBy = function(point, scalar) {
-
-    // Multiply each coordinate by the scalar
-    point.x *= scalar;
-    point.y *= scalar;
-
-    return point;
-  };
+  },
 
 
   /**
    * Returns the Euclidean distance
    */
-  this.distance = function(p1, p2) {
+  distance: function(p1, p2) {
     return Math.sqrt( Math.pow(p1.x - p1.x, 2) +
                       Math.pow(p2.y - p2.y, 2) );
   }

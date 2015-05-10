@@ -1,8 +1,9 @@
 'use strict';
 
-var Point = require('./point').Point;
-var Vector = require('./point').Vector;
+var Point = require('./point').Point;     // Uninvoked Class
+var Vector = require('./point').Vector; // Invoked Library
 var _ = require('underscore');
+
 
 
 /**
@@ -21,6 +22,7 @@ var Boids = function(config) {
 
   // Public API
   this.next = next;
+  this.returnNext = returnNext;
 
   // Array of boids in the simulation
   var boidList = createBoids();
@@ -31,7 +33,7 @@ var Boids = function(config) {
 
 
   /**
-   * Moves all of the boids and returns boidList with the new locations
+   * Moves all of the boids
    * */
   function next() {
     // Create a shallow clone to reference for the next move
@@ -40,8 +42,14 @@ var Boids = function(config) {
 
     // Move each boid
     _.each(boidList, move);
+  }
 
-    // return the boid list for the next simulation frame
+
+  /**
+   * Moves all of the boids and returns boidList with the new locations
+   * */
+  function returnNext() {
+    next();
     return boidList;
   }
 
@@ -116,30 +124,3 @@ var Boids = function(config) {
 };
 
 module.exports = Boids;
-
-
-
-/**
- // * Web workers
- // * */
-//function spawnWorker(file) {
-//
-//  var worker = new Worker(file);
-//
-//  return function(boidIndex, boidArray) {
-//
-//    var result;
-//
-//    worker.onmessage = function(e) {
-//      result = e.data;
-//    };
-//
-//    worker.postMessage({
-//      boidIndex: boidIndex,
-//      boidArray: boidArray
-//    });
-//  }
-//}
-//
-//var testWorker = spawnWorker('/workers/test.js');
-//testWorker(3, [4,5,6])

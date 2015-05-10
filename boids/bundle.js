@@ -13,13 +13,18 @@ var _ = require('underscore');
 /**
  * Simulation Class
  */
-var Simulation = function(options) {
+var Simulation = function(canvasId, options) {
 
+  // Store a reference to the canvas element
+  var cvs = document.getElementById(canvasId);
+  var ctx = cvs.getContext('2d');
+
+  // Configuration elements
   var config = {
 
-    // Default canvas size
-    height: 150,
-    width: 300,
+    // Canvas size
+    height: cvs.height,
+    width: cvs.width,
 
     // Number of Boids
     boidCount: 100,
@@ -41,8 +46,28 @@ var Simulation = function(options) {
     }
   });
 
-  var boids = new Boids(config);
+  var
+    boids = new Boids(config),
+    running = true,
+    iterations = 0;
 
+  /**
+   * Draws the next frame of the simulation
+   * */
+  function draw(list) {
+
+    // Hackey way to clear the canvas
+    ctx.clearRect(0, 0, config.width, config.height);
+
+    // makes boids dark grey
+    ctx.fillStyle = 'black';
+
+    // For each boid, draw a square in its location
+    _.each(list, function(b) {
+
+      ctx.fillRect(b.location.x, b.location.y, 3, 3);
+    });
+  }
 
 
   /**
@@ -50,24 +75,47 @@ var Simulation = function(options) {
    * */
   this.start = function() {
     console.log('started');
-    return this;
+
+    while(running) {
+      ++iterations;
+      if (iterations % 5 === 0) {
+
+        // Every 5th iteration, return the boid list and draw its contents
+       draw( boids.returnNext() );
+
+      } else {
+
+        // Otherwise, just advance the simulation
+        boids.next();
+      }
+
+      // stops after 100 iterations, for testing
+      if (iterations === 100) {
+        running = false;
+      }
+    }
   };
 
   /**
-   * Stops the simulation
+   * FUTURE: Stops the simulation
    * */
-  this.stop = function() {
-    console.log('stopped');
-    return this;
-  };
+  //this.stop = function() {
+  //  console.log('stopped');
+  //  return this;
+  //};
 
   /**
-   * Initializes and starts a new simulation
+   * FUTURE: Initializes and starts a new simulation
    * */
-  this.reset = function() {
-    console.log('reset');
-    return this;
-  };
+  //this.reset = function() {
+  //
+  //  this.stop();
+  //  var boids = new Boids(config);
+  //  this.start();
+  //
+  //  console.log('reset');
+  //  return this;
+  //};
 
   this.viewConfig = function() {
     console.log( JSON.stringify(config) );
@@ -79,23 +127,23 @@ var Simulation = function(options) {
 
 
 /**
- * Demo using a 100% x 100% canvas
+ * Demo using a 600 x 600 canvas
  * */
 
-var c = document.getElementById('canvas');
 
 var options = {
-  height: c.scrollHeight,
-  width:  c.scrollWidth
+
 };
 
 // Initialize and start a new simulation
-var sim = new Simulation(options).start();
+var sim = new Simulation('canvas', options).start();
 },{"./boids":2,"underscore":4}],2:[function(require,module,exports){
 'use strict';
 
-var Point = require('./point');
+var Point = require('./point').Point;     // Uninvoked Class
+var Vector = require('./point').Vector; // Invoked Library
 var _ = require('underscore');
+
 
 
 /**
@@ -112,30 +160,88 @@ var Boid = function(position, velocity) {
  */
 var Boids = function(config) {
 
+  // Public API
+  this.next = next;
+  this.returnNext = returnNext;
+
+  // Array of boids in the simulation
   var boidList = createBoids();
 
+  // In each iteration, a copy is made of boid list for use in comparison
+  // All changes in each cycle are made directly to boidList.
+  var boidListClone;
 
+
+  /**
+   * Moves all of the boids
+   * */
   function next() {
+    // Create a shallow clone to reference for the next move
+    // All boid changes are made to boid list so that it does not break the object references
+    boidListClone = _.clone(boidList);
+
+    // Move each boid
     _.each(boidList, move);
+  }
+
+
+  /**
+   * Moves all of the boids and returns boidList with the new locations
+   * */
+  function returnNext() {
+    next();
+    return boidList;
   }
 
 
   /**
    * Moves a boid to its next location
    * */
-  function move(b) {
+  function move(b, i) {
 
-    // Finds the movement vectors
-    var center = centerOfMass(b);
-    var safe = safeDistance(b);
-    var vel = velocity(b);
+    // Finds the movement vectors.
+    // 'i' is the current boid's index.
+    var center = centerOfMass(i);
+    var safe = safeDistance(i);
+    var vel = matchVelocity(i);
 
+    // Updates the boid's velocity
+    b.velocity = Vector.add(b.velocity, center, safe, vel);
 
+    // Updates the boid's location
+    b.location = Vector.add(b.location, b.velocity);
+  }
+
+  /**
+   * Rule: Boids tend to move towards the center of mass of the other boids
+   * */
+  function centerOfMass(boid) {
+
+    return new Point();
   }
 
 
   /**
-   * Creates an array of boids at random locations on the canvas*/
+   * Rule: Boids attempt to keep a safe distance from obstacles and other boids
+   */
+  function safeDistance(boid) {
+
+    return new Point();
+  }
+
+
+  /**
+   * Rule: Boids attempt to match the velocity of the other boids
+   * */
+  function matchVelocity(boid) {
+
+    return new Point();
+  }
+
+
+  /**
+   * Creates an array of boids at random locations on the canvas
+   * */
   function createBoids() {
 
     // Array of new random boids
@@ -155,43 +261,36 @@ var Boids = function(config) {
     return newBoidList;
   }
 
-
-  /**
-   * Web workers
-   * */
-  function spawnWorker(file) {
-    if (!!window.Worker) {
-
-      var worker = new Worker(file);
-
-      return function(boidIndex, boidArray) {
-
-        var result;
-
-        worker.onmessage = function(e) {
-          console.log(e.data);
-        };
-
-        worker.postMessage({
-          boidIndex: boidIndex,
-          boidArray: boidArray
-        });
-
-      }
-    }
-  }
-
-  var testWorker = spawnWorker('/workers/test.js');
-
-  testWorker(3, [4,5,6])
-
 };
 
 module.exports = Boids;
 
 
 
-
+/**
+ // * Web workers
+ // * */
+//function spawnWorker(file) {
+//
+//  var worker = new Worker(file);
+//
+//  return function(boidIndex, boidArray) {
+//
+//    var result;
+//
+//    worker.onmessage = function(e) {
+//      result = e.data;
+//    };
+//
+//    worker.postMessage({
+//      boidIndex: boidIndex,
+//      boidArray: boidArray
+//    });
+//  }
+//}
+//
+//var testWorker = spawnWorker('/workers/test.js');
+//testWorker(3, [4,5,6])
 },{"./point":3,"underscore":4}],3:[function(require,module,exports){
 'use strict';
 
@@ -205,11 +304,18 @@ var Point = function(x, y) {
   this.x = x || 0;
   this.y = y || 0;
 
+};
+
+
+/**
+ * Utility Library for vector geometry
+ */
+var Vector = {
 
   /**
   * Adds one or many vectors to a point
   * */
-  this.add = function() {
+  add: function() {
 
     // Initialize a point at (0, 0)
     var sum = {x:0, y: 0};
@@ -220,129 +326,103 @@ var Point = function(x, y) {
       sum.y += p.y;
     });
 
-    // Add the sum to the point
-    this.x += sum.x;
-    this.y += sum.y;
-
-    // Return this for chaining
-    return this;
-  };
+    // Return the sum
+    return sum;
+  },
 
 
   /**
   * Subtracts one or many vectors from a point
   */
-  this.subtract = function() {
+  subtract: function(point) {
 
-    // Initialize a new Point at (0, 0)
-    var diff = {x:0, y: 0};
+    // Store an initial point, or initialize a new Point at (0, 0)
+    if (!point) point = new Point();
 
-    // Sum up all of the vectors
-    _.each(arguments, function(p) {
-      diff.x += p.x;
-      diff.y += p.y;
+    // Sum up all of the vectors following the initial point
+    _.each(arguments, function(p, i) {
+      if (i > 0){
+        point.x += p.x;
+        point.y += p.y;
+      }
     });
 
-    // Return the Subtract that sum from the point
-    this.x -= sum.x;
-    this.y -= sum.y;
-
-    // Return this for chaining
-    return this;
-  };
+    return point;
+  },
 
 
   /**
   * Multiplies the point by another point's coordinates
   */
-  this.multiply = function(otherPoint) {
+  multiply: function(p1, p2) {
 
     // Multiply each coordinate by the other point's coordinate
-    this.x *= otherPoint.x;
-    this.y *= otherPoint.y;
+    p1.x *= p2.x;
+    p1.y *= p2.y;
 
-    // Return this for chaining
-    return this;
-  };
+    return p1;
+  },
 
 
   /**
   * Multiplies the point's coordinates by a scalar variable
   */
-  this.multiplyBy = function(scalar) {
+  multiplyBy: function(point, scalar) {
 
     // Multiply each coordinate by the scalar
-    this.x *= scalar;
-    this.y *= scalar;
+    point.x *= scalar;
+    point.y *= scalar;
 
-    // Return this for chaining
-    return this;
-  };
+    return point;
+  },
 
 
   /**
   * Divides the point's coordinates by another point's coordinates
   */
-  this.divide = function(otherPoint) {
+  divide: function(p1, p2) {
     // TODO: Make sure that neither of the divisors are 0
 
     // Divide each coordinate by the other point's coordinate
-    this.x /= otherPoint.x;
-    this.y /= otherPoint.y;
+    p1.x /= p2.x;
+    p1.y /= p2.y;
 
-    // Return this for chaining
-    return this;
-  };
+    return p1;
+  },
 
 
   /**
   * Divides the point's coordinates by a scalar variable
   */
-  this.divideBy = function(scalar) {
+  divideBy: function(point, scalar) {
 
     if (scalar != 0) {
 
       // Divide each coordinate by the scalar
-      this.x /= scalar;
-      this.y /= scalar;
+      point.x /= scalar;
+      point.y /= scalar;
     } else {
       // TODO: Come up with a condition if the scalar is 0
+      return 0;
     }
 
-    // Return this for chaining
-    return this;
-  };
+    return point;
+  },
 
 
   /**
-  * Multiplies the point by another point's coordinates
-  */
-  this.multiply = function(otherPoint) {
+   * Returns the Euclidean distance
+   */
+  distance: function(p1, p2) {
+    return Math.sqrt( Math.pow(p1.x - p1.x, 2) +
+                      Math.pow(p2.y - p2.y, 2) );
+  }
 
-    // Multiply each coordinate by the other point's coordinate
-    this.x *= otherPoint.x;
-    this.y *= otherPoint.y;
-
-    // Return this for chaining
-    return this;
-  };
-
-
-  /**
-  * Multiplies the point's coordinates by a scalar variable
-  */
-  this.multiplyBy = function(scalar) {
-
-    // Multiply each coordinate by the scalar
-    this.x *= scalar;
-    this.y *= scalar;
-
-    // Return this for chaining
-    return this;
-  };
 };
 
-module.exports = Point;
+
+exports.Point = Point;
+exports.Vector = Vector;
 },{"underscore":4}],4:[function(require,module,exports){
 //     Underscore.js 1.8.3
 //     http://underscorejs.org
