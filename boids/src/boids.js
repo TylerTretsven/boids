@@ -1,9 +1,8 @@
 'use strict';
 
-var Point = require('./point').Point;     // Uninvoked Class
-var Vector = require('./point').Vector; // Invoked Library
+var Point = require('./point').Point;
+var Vector = require('./point').Vector;
 var _ = require('underscore');
-
 
 
 /**
