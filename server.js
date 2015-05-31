@@ -1,6 +1,6 @@
 var express = require('express');
 var path = require('path');
-var favicon = require('serve-favicon');
+//var favicon = require('serve-favicon');
 var logger = require('morgan');
 var cookieParser = require('cookie-parser');
 var bodyParser = require('body-parser');
@@ -21,7 +21,7 @@ app.use(express.static(path.join(__dirname, 'boids')));
 
 
 app.get('/', function(req, res, next) {
-  res.render('index', { title: 'Boids' });
+  res.render('index', { title: 'BoidsSim' });
 });
 
 // catch 404 and forward to error handler

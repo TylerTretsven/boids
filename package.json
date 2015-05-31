@@ -15,6 +15,7 @@
     "jade": "~1.9.1",
     "morgan": "~1.5.1",
     "serve-favicon": "~2.2.0",
+    "ticker": "^0.1.0",
     "underscore": "^1.8.3",
     "victor": "^0.2.6",
     "vinyl-source-stream": "^1.1.0"

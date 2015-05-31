@@ -7,13 +7,15 @@
 
 'use strict';
 
-var Boids = require('./boids');
+var BoidsSim = require('./boids');
+var ticker = require('ticker');
 var _ = require('underscore');
 
 /**
  * Simulation Class
  */
 var Simulation = function(canvasId, options) {
+
 
   // Store a reference to the canvas element
   var cvs = document.getElementById(canvasId);
@@ -26,16 +28,18 @@ var Simulation = function(canvasId, options) {
     height: cvs.height,
     width: cvs.width,
 
-    // Number of Boids
+    // Number of BoidsSim
     boidCount: 100,
 
     // Simulation variables
     // TODO: Be more specific
-    safeDistance: 10,
-    maxVelocity: 20,
-    percentToCenter: 1/8.0,
-    borderBuffer: 10,
-    velocityAdded: 1/8.0
+    safeDistance: 50,
+    safeDistanceRepel: 1,
+    maxVelocity: 5,
+    percentToCenter: 1/100,
+    percentToGoal: 1/5,
+    borderBuffer: 20,
+    velocityAdded: 1/20
   };
 
 
@@ -46,196 +50,270 @@ var Simulation = function(canvasId, options) {
     }
   });
 
-  var
-    boids = new Boids(config),
-    running = true,
-    iterations = 0;
+  var Boids = new BoidsSim(config);
+
+  /**
+   * Runs the simulation
+   */
+  // Contains the array of boids to display on the next draw
+  var boids = [];
+
+  ticker(window, 45).on('tick', function() {
+    boids = Boids.next();
+  }).on('draw', function() {
+    draw(boids);
+  });
 
   /**
    * Draws the next frame of the simulation
    * */
   function draw(list) {
 
-    // Hackey way to clear the canvas
+    // Clear the canvas
     ctx.clearRect(0, 0, config.width, config.height);
 
-    // makes boids dark grey
+    // Makes the boids black
     ctx.fillStyle = 'black';
 
     // For each boid, draw a square in its location
     _.each(list, function(b) {
-
       ctx.fillRect(b.location.x, b.location.y, 3, 3);
     });
   }
 
-
-  /**
-   * Starts the simulation
-   * */
-  this.start = function() {
-    console.log('started');
-
-    while(running) {
-      ++iterations;
-      if (iterations % 5 === 0) {
-
-        // Every 5th iteration, return the boid list and draw its contents
-       draw( boids.returnNext() );
-
-      } else {
-
-        // Otherwise, just advance the simulation
-        boids.next();
-      }
-
-      // stops after 100 iterations, for testing
-      if (iterations === 100) {
-        running = false;
-      }
-    }
-  };
-
-  /**
-   * FUTURE: Stops the simulation
-   * */
-  //this.stop = function() {
-  //  console.log('stopped');
-  //  return this;
-  //};
-
-  /**
-   * FUTURE: Initializes and starts a new simulation
-   * */
-  //this.reset = function() {
-  //
-  //  this.stop();
-  //  var boids = new Boids(config);
-  //  this.start();
-  //
-  //  console.log('reset');
-  //  return this;
-  //};
-
-  this.viewConfig = function() {
-    console.log( JSON.stringify(config) );
-  };
-
-  // Returns the Simulation object for chaining
-  return this;
 };
 
 
 /**
- * Demo using a 600 x 600 canvas
+ * Demo
  * */
 
-
-var options = {
-
-};
+var options = {};
 
 // Initialize and start a new simulation
-var sim = new Simulation('canvas', options).start();
-},{"./boids":2,"underscore":4}],2:[function(require,module,exports){
+var sim = new Simulation('canvas', options);
+},{"./boids":2,"ticker":4,"underscore":5}],2:[function(require,module,exports){
+/**
+ * Boids Algorithm
+ * ===============
+ *
+ * Simulation of the Boids algorithm.  The simulation only has one public
+ * method: Boids.next.  Boids.next returns the boid locations for the next
+ * frame of the simulation.
+ */
+
 'use strict';
 
-var Point = require('./point').Point;     // Uninvoked Class
-var Vector = require('./point').Vector; // Invoked Library
+var Victor = require('victor');
 var _ = require('underscore');
-
-
 
 /**
  * Boid Class
  * */
 var Boid = function(position, velocity) {
-  this.location = position || new Point();
-  this.velocity = velocity || new Point();
+  this.location = position || new Victor();
+  this.velocity = velocity || new Victor();
 };
 
-
 /**
- * Boids class
+ * BoidsSim Simulation class
  */
 var Boids = function(config) {
 
-  // Public API
-  this.next = next;
-  this.returnNext = returnNext;
+  // Creates the array of boids for the simulation
+  var boids = createBoids();
 
-  // Array of boids in the simulation
-  var boidList = createBoids();
+  // Store for more efficient distance comparisons
+  var squaredSafeDistance = Math.pow(config.safeDistance, 2);
 
-  // In each iteration, a copy is made of boid list for use in comparison
-  // All changes in each cycle are made directly to boidList.
-  var boidListClone;
+  // Resets the mouse location.  This is used as the goal.
+  var mouseLocation = new Victor();
+  window.onmousemove = function(e) {
+    mouseLocation.x = e.x;
+    mouseLocation.y = e.y;
+  };
 
 
   /**
-   * Moves all of the boids
+   * Moves all of the boids and returns the boid list
    * */
   function next() {
-    // Create a shallow clone to reference for the next move
-    // All boid changes are made to boid list so that it does not break the object references
-    boidListClone = _.clone(boidList);
 
-    // Move each boid
-    _.each(boidList, move);
+    // Stores each boid's movement vector for the next frame
+    // initializes each as a new vector at (0, 0)
+    var movements = new Array(boids.length);
+    for (var m=0; m<movements.length; m++) { movements[m] = new Victor(); }
+
+    // Find the average center of mass and velocity for all boids
+    var totalAvgCenter = centerOfMass();
+    var totalAvgVelocity = averageVelocity();
+
+    // Loops through the boid indices
+    for (var i=0; i<boids.length; i++) {
+
+      /**
+       * Center of Mass rule
+       *
+       * Subtracts the boid's location, divided by the total number of boids,
+       * from the average center of mass
+       */
+
+      // Find the boid's contribution to the total average
+      var weightedBoidLocation = {
+        x: boids[i].location.x / boids.length,
+        y: boids[i].location.x / boids.length
+      };
+
+      // Find the total center without the boid's location
+      var adjustedAvgCenter = totalAvgCenter.clone().subtract(weightedBoidLocation);
+
+      // Find the distances to the center
+      var dx = adjustedAvgCenter.x - weightedBoidLocation.x;
+      var dy = adjustedAvgCenter.y - weightedBoidLocation.y;
+
+      // Add a certain percentage of that distance to the next movement
+      var toCenter = new Victor(dx * config.percentToCenter, dy * config.percentToCenter);
+      movements[i].add(toCenter);
+
+
+      /**
+       * Match Velocity rule
+       *
+       * Subtracts the boid's velocity, divided by the total number of boids,
+       * from the average velocity
+       */
+
+      // Find the boid's contribution to the total average
+      var weightedBoidVelocity = {
+        x: boids[i].velocity.x / boids.length,
+        y: boids[i].velocity.y / boids.length
+      };
+
+      // Find the average velocity without the boids contribution
+      var adjustedAvgVelocity = totalAvgVelocity.clone().subtract(weightedBoidVelocity);
+
+      // Find the 'distance' towards the average
+      dx = adjustedAvgVelocity.x - weightedBoidVelocity.x;
+      dy = adjustedAvgVelocity.y - weightedBoidVelocity.y;
+
+      // Add a certain percentage of that distance towards the next movement
+      var toAverageVelocity = new Victor(dx * config.velocityAdded, dy * config.velocityAdded);
+      movements[i].add(toAverageVelocity);
+
+
+      /**
+       * Safe Distance rule
+       *
+       * Each boid calculates its distance to each other boid after it.
+       * If the distance is less than the safe distance, it applies the doubling
+       * rule to both itself and the other boids movement vector.
+       */
+      // j will be the index of each boid in boids following i.  Allows it to only check
+      // paired distances once
+      for (var j = i + 1; j < boids.length; j++) {
+
+        // Finds whether the distance between two boids is less than or equal to
+        // the safe distance, (squared distances for efficiency)
+        if (boids[i].location.distanceSq(boids[j].location) <= squaredSafeDistance) {
+
+          // If so, it finds the distances between them (from the perspective of boid i)
+          dx = boids[j].location.x - boids[i].location.x;
+          dy = boids[j].location.y - boids[i].location.y;
+
+          // Creates difference vector from boid i to boid j, multiplied by a scalar that controls the repulsion factor
+          var difference = new Victor(dx * config.safeDistanceRepel, dy * config.safeDistanceRepel);
+
+          // Moves boid i away from boid j, and vice versa
+          movements[i].subtract(difference);
+          movements[j].add(difference);
+        }
+      }
+
+      /**
+       * Avoid borders
+       */
+      //if (boids[i].location.x <= config.borderBuffer) {
+      //  movements[i].x += (boids[i].location.x);
+      //}
+      //if (boids[i].location.y <= config.borderBuffer) {
+      //  movements[i].y += (boids[i].location.y);
+      //}
+      //if ((config.width - boids[i].location.x) <= config.borderBuffer) {
+      //  movements[i].x -= (config.width - boids[i].location.x);
+      //}
+      //if ((config.height - boids[i].location.y) <= config.borderBuffer) {
+      //  movements[i].y -= (config.height - boids[i].location.y);
+      //}
+
+
+      /**
+       * Move towards the mouse
+       */
+      // Finds the distances to the mouse location
+      dx = mouseLocation.x - boids[i].location.x;
+      dy = mouseLocation.y - boids[i].location.y;
+
+      // Adds a percentage of that distance to the next move
+      var toMouse = new Victor(dx * config.percentToGoal, dy * config.percentToGoal);
+      movements[i].add(toMouse);
+    }
+
+
+    /**
+     * Moves each boid to its next location
+     */
+    for (i=0; i<boids.length; i++) {
+
+      // Updates the boid's velocity
+      boids[i].velocity.add(movements[i]);
+
+      // Limit Velocity
+      if (boids[i].velocity.magnitude() >= config.maxVelocity) {
+        boids[i].velocity = limit(boids[i].velocity, config.maxVelocity);
+      }
+
+      // Updates the boid's location
+      boids[i].location.add(boids[i].velocity);
+    }
+
+    return boids;
   }
 
-
-  /**
-   * Moves all of the boids and returns boidList with the new locations
-   * */
-  function returnNext() {
-    next();
-    return boidList;
-  }
-
-
-  /**
-   * Moves a boid to its next location
-   * */
-  function move(b, i) {
-
-    // Finds the movement vectors.
-    // 'i' is the current boid's index.
-    var center = centerOfMass(i);
-    var safe = safeDistance(i);
-    var vel = matchVelocity(i);
-
-    // Updates the boid's velocity
-    b.velocity = Vector.add(b.velocity, center, safe, vel);
-
-    // Updates the boid's location
-    b.location = Vector.add(b.location, b.velocity);
-  }
 
   /**
    * Rule: Boids tend to move towards the center of mass of the other boids
+   *
+   * CenterOfMass finds the average center of mass of all boids.
    * */
-  function centerOfMass(boid) {
+  function centerOfMass() {
 
-    return new Point();
-  }
+    var total = new Victor();
 
+    _.each(boids, function(b) {
+      total.add(b.location);
+    });
 
-  /**
-   * Rule: Boids attempt to keep a safe distance from obstacles and other boids
-   */
-  function safeDistance(boid) {
+    total.x /= boids.length;
+    total.y /= boids.length;
 
-    return new Point();
+    return total;
   }
 
 
   /**
    * Rule: Boids attempt to match the velocity of the other boids
    * */
-  function matchVelocity(boid) {
+  function averageVelocity() {
+    var total = new Victor();
 
-    return new Point();
+    _.each(boids, function (b) {
+      total.add(b.velocity);
+    });
+
+    total.x /= boids.length;
+    total.y /= boids.length;
+
+    return total;
   }
 
 
@@ -247,183 +325,419 @@ var Boids = function(config) {
     // Array of new random boids
     var newBoidList = [];
 
-    _.each( _.range(config.boidCount), function(val, i) {
+    for (var i=0; i<config.boidCount; i++) {
 
-      // Generate random x and y coordinates
-      var x = Math.random() * config.width;
-      var y = Math.random() * config.height;
+      // Location: Generate random x and y coordinates
+      var lx = Math.random() * config.width;
+      var ly = Math.random() * config.height;
+      var location = new Victor(lx, ly); // Random Victor
 
-      var p = new Point(x, y);
+      // Velocity: Generate random velocities within maxSpeed
+      var vx = Math.random() * config.maxVelocity;
+      var vy = Math.random() * config.maxVelocity;
+      if (Math.random() >= 0.5) { vx *= -1; }
+      if (Math.random() >= 0.5) { vy *= -1; }
 
-      newBoidList[i] = new Boid(p);
-    });
+      var velocity = new Victor(vx, vy); // Random Victor
+
+      newBoidList[i] = new Boid(location, velocity);
+    }
 
     return newBoidList;
   }
 
-};
-
-module.exports = Boids;
-
-
-
-/**
- // * Web workers
- // * */
-//function spawnWorker(file) {
-//
-//  var worker = new Worker(file);
-//
-//  return function(boidIndex, boidArray) {
-//
-//    var result;
-//
-//    worker.onmessage = function(e) {
-//      result = e.data;
-//    };
-//
-//    worker.postMessage({
-//      boidIndex: boidIndex,
-//      boidArray: boidArray
-//    });
-//  }
-//}
-//
-//var testWorker = spawnWorker('/workers/test.js');
-//testWorker(3, [4,5,6])
-},{"./point":3,"underscore":4}],3:[function(require,module,exports){
-'use strict';
-
-var _ = require('underscore');
-
-/**
- * Point class
- */
-var Point = function(x, y) {
-
-  this.x = x || 0;
-  this.y = y || 0;
-
-};
-
-
-/**
- * Utility Library for vector geometry
- */
-var Vector = {
-
   /**
-  * Adds one or many vectors to a point
-  * */
-  add: function() {
-
-    // Initialize a point at (0, 0)
-    var sum = {x:0, y: 0};
-
-    // For Each point, increment sum.x and sum.y
-    _.each(arguments, function(p) {
-      sum.x += p.x;
-      sum.y += p.y;
-    });
-
-    // Return the sum
-    return sum;
-  },
-
-
-  /**
-  * Subtracts one or many vectors from a point
-  */
-  subtract: function(point) {
-
-    // Store an initial point, or initialize a new Point at (0, 0)
-    if (!point) point = new Point();
-
-    // Sum up all of the vectors following the initial point
-    _.each(arguments, function(p, i) {
-      if (i > 0){
-        point.x += p.x;
-        point.y += p.y;
-      }
-    });
-
-    return point;
-  },
-
-
-  /**
-  * Multiplies the point by another point's coordinates
-  */
-  multiply: function(p1, p2) {
-
-    // Multiply each coordinate by the other point's coordinate
-    p1.x *= p2.x;
-    p1.y *= p2.y;
-
-    return p1;
-  },
-
-
-  /**
-  * Multiplies the point's coordinates by a scalar variable
-  */
-  multiplyBy: function(point, scalar) {
-
-    // Multiply each coordinate by the scalar
-    point.x *= scalar;
-    point.y *= scalar;
-
-    return point;
-  },
-
-
-  /**
-  * Divides the point's coordinates by another point's coordinates
-  */
-  divide: function(p1, p2) {
-    // TODO: Make sure that neither of the divisors are 0
-
-    // Divide each coordinate by the other point's coordinate
-    p1.x /= p2.x;
-    p1.y /= p2.y;
-
-    return p1;
-  },
-
-
-  /**
-  * Divides the point's coordinates by a scalar variable
-  */
-  divideBy: function(point, scalar) {
-
-    if (scalar != 0) {
-
-      // Divide each coordinate by the scalar
-      point.x /= scalar;
-      point.y /= scalar;
-    } else {
-      // TODO: Come up with a condition if the scalar is 0
-      return 0;
-    }
-
-    return point;
-  },
-
-
-  /**
-   * Returns the Euclidean distance
+   * Reduce a vector down to a certain magnitude while maintaining its slope
    */
-  distance: function(p1, p2) {
-    return Math.sqrt( Math.pow(p1.x - p1.x, 2) +
-                      Math.pow(p2.y - p2.y, 2) );
+  function limit(vector, lim) {
+    var reductionCoeff = lim / vector.magnitude();
+    return new Victor( vector.x * reductionCoeff, vector.y * reductionCoeff );
   }
 
+
+  /**
+   * Testing suite -- called when on debug mode
+   * */
+
+  function test() {
+    /**
+     * Test the boid creation and rule methods
+     */
+  }
+
+  return {
+    /**
+     * Public API
+     */
+    // Moves all the boids to the next location returns the boid array
+    next: next
+  }
+}
+
+module.exports = Boids;
+},{"underscore":5,"victor":6}],3:[function(require,module,exports){
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+function EventEmitter() {
+  this._events = this._events || {};
+  this._maxListeners = this._maxListeners || undefined;
+}
+module.exports = EventEmitter;
+
+// Backwards-compat with node 0.10.x
+EventEmitter.EventEmitter = EventEmitter;
+
+EventEmitter.prototype._events = undefined;
+EventEmitter.prototype._maxListeners = undefined;
+
+// By default EventEmitters will print a warning if more than 10 listeners are
+// added to it. This is a useful default which helps finding memory leaks.
+EventEmitter.defaultMaxListeners = 10;
+
+// Obviously not all Emitters should be limited to 10. This function allows
+// that to be increased. Set to zero for unlimited.
+EventEmitter.prototype.setMaxListeners = function(n) {
+  if (!isNumber(n) || n < 0 || isNaN(n))
+    throw TypeError('n must be a positive number');
+  this._maxListeners = n;
+  return this;
 };
 
+EventEmitter.prototype.emit = function(type) {
+  var er, handler, len, args, i, listeners;
 
-exports.Point = Point;
-exports.Vector = Vector;
-},{"underscore":4}],4:[function(require,module,exports){
+  if (!this._events)
+    this._events = {};
+
+  // If there is no 'error' event listener then throw.
+  if (type === 'error') {
+    if (!this._events.error ||
+        (isObject(this._events.error) && !this._events.error.length)) {
+      er = arguments[1];
+      if (er instanceof Error) {
+        throw er; // Unhandled 'error' event
+      }
+      throw TypeError('Uncaught, unspecified "error" event.');
+    }
+  }
+
+  handler = this._events[type];
+
+  if (isUndefined(handler))
+    return false;
+
+  if (isFunction(handler)) {
+    switch (arguments.length) {
+      // fast cases
+      case 1:
+        handler.call(this);
+        break;
+      case 2:
+        handler.call(this, arguments[1]);
+        break;
+      case 3:
+        handler.call(this, arguments[1], arguments[2]);
+        break;
+      // slower
+      default:
+        len = arguments.length;
+        args = new Array(len - 1);
+        for (i = 1; i < len; i++)
+          args[i - 1] = arguments[i];
+        handler.apply(this, args);
+    }
+  } else if (isObject(handler)) {
+    len = arguments.length;
+    args = new Array(len - 1);
+    for (i = 1; i < len; i++)
+      args[i - 1] = arguments[i];
+
+    listeners = handler.slice();
+    len = listeners.length;
+    for (i = 0; i < len; i++)
+      listeners[i].apply(this, args);
+  }
+
+  return true;
+};
+
+EventEmitter.prototype.addListener = function(type, listener) {
+  var m;
+
+  if (!isFunction(listener))
+    throw TypeError('listener must be a function');
+
+  if (!this._events)
+    this._events = {};
+
+  // To avoid recursion in the case that type === "newListener"! Before
+  // adding it to the listeners, first emit "newListener".
+  if (this._events.newListener)
+    this.emit('newListener', type,
+              isFunction(listener.listener) ?
+              listener.listener : listener);
+
+  if (!this._events[type])
+    // Optimize the case of one listener. Don't need the extra array object.
+    this._events[type] = listener;
+  else if (isObject(this._events[type]))
+    // If we've already got an array, just append.
+    this._events[type].push(listener);
+  else
+    // Adding the second element, need to change to array.
+    this._events[type] = [this._events[type], listener];
+
+  // Check for listener leak
+  if (isObject(this._events[type]) && !this._events[type].warned) {
+    var m;
+    if (!isUndefined(this._maxListeners)) {
+      m = this._maxListeners;
+    } else {
+      m = EventEmitter.defaultMaxListeners;
+    }
+
+    if (m && m > 0 && this._events[type].length > m) {
+      this._events[type].warned = true;
+      console.error('(node) warning: possible EventEmitter memory ' +
+                    'leak detected. %d listeners added. ' +
+                    'Use emitter.setMaxListeners() to increase limit.',
+                    this._events[type].length);
+      if (typeof console.trace === 'function') {
+        // not supported in IE 10
+        console.trace();
+      }
+    }
+  }
+
+  return this;
+};
+
+EventEmitter.prototype.on = EventEmitter.prototype.addListener;
+
+EventEmitter.prototype.once = function(type, listener) {
+  if (!isFunction(listener))
+    throw TypeError('listener must be a function');
+
+  var fired = false;
+
+  function g() {
+    this.removeListener(type, g);
+
+    if (!fired) {
+      fired = true;
+      listener.apply(this, arguments);
+    }
+  }
+
+  g.listener = listener;
+  this.on(type, g);
+
+  return this;
+};
+
+// emits a 'removeListener' event iff the listener was removed
+EventEmitter.prototype.removeListener = function(type, listener) {
+  var list, position, length, i;
+
+  if (!isFunction(listener))
+    throw TypeError('listener must be a function');
+
+  if (!this._events || !this._events[type])
+    return this;
+
+  list = this._events[type];
+  length = list.length;
+  position = -1;
+
+  if (list === listener ||
+      (isFunction(list.listener) && list.listener === listener)) {
+    delete this._events[type];
+    if (this._events.removeListener)
+      this.emit('removeListener', type, listener);
+
+  } else if (isObject(list)) {
+    for (i = length; i-- > 0;) {
+      if (list[i] === listener ||
+          (list[i].listener && list[i].listener === listener)) {
+        position = i;
+        break;
+      }
+    }
+
+    if (position < 0)
+      return this;
+
+    if (list.length === 1) {
+      list.length = 0;
+      delete this._events[type];
+    } else {
+      list.splice(position, 1);
+    }
+
+    if (this._events.removeListener)
+      this.emit('removeListener', type, listener);
+  }
+
+  return this;
+};
+
+EventEmitter.prototype.removeAllListeners = function(type) {
+  var key, listeners;
+
+  if (!this._events)
+    return this;
+
+  // not listening for removeListener, no need to emit
+  if (!this._events.removeListener) {
+    if (arguments.length === 0)
+      this._events = {};
+    else if (this._events[type])
+      delete this._events[type];
+    return this;
+  }
+
+  // emit removeListener for all listeners on all events
+  if (arguments.length === 0) {
+    for (key in this._events) {
+      if (key === 'removeListener') continue;
+      this.removeAllListeners(key);
+    }
+    this.removeAllListeners('removeListener');
+    this._events = {};
+    return this;
+  }
+
+  listeners = this._events[type];
+
+  if (isFunction(listeners)) {
+    this.removeListener(type, listeners);
+  } else {
+    // LIFO order
+    while (listeners.length)
+      this.removeListener(type, listeners[listeners.length - 1]);
+  }
+  delete this._events[type];
+
+  return this;
+};
+
+EventEmitter.prototype.listeners = function(type) {
+  var ret;
+  if (!this._events || !this._events[type])
+    ret = [];
+  else if (isFunction(this._events[type]))
+    ret = [this._events[type]];
+  else
+    ret = this._events[type].slice();
+  return ret;
+};
+
+EventEmitter.listenerCount = function(emitter, type) {
+  var ret;
+  if (!emitter._events || !emitter._events[type])
+    ret = 0;
+  else if (isFunction(emitter._events[type]))
+    ret = 1;
+  else
+    ret = emitter._events[type].length;
+  return ret;
+};
+
+function isFunction(arg) {
+  return typeof arg === 'function';
+}
+
+function isNumber(arg) {
+  return typeof arg === 'number';
+}
+
+function isObject(arg) {
+  return typeof arg === 'object' && arg !== null;
+}
+
+function isUndefined(arg) {
+  return arg === void 0;
+}
+
+},{}],4:[function(require,module,exports){
+(function (global){
+var EventEmitter = require('events').EventEmitter
+
+var _raf =
+  global.requestAnimationFrame ||
+  global.webkitRequestAnimationFrame ||
+  global.mozRequestAnimationFrame ||
+  global.msRequestAnimationFrame ||
+  global.oRequestAnimationFrame
+
+module.exports = ticker
+
+var currtime =
+  global.performance &&
+  global.performance.now ? function() {
+    return performance.now()
+  } : Date.now || function () {
+    return +new Date
+  }
+
+function ticker(element, rate, limit) {
+  var fps = 1000 / (rate || 60)
+    , emitter = new EventEmitter
+    , last = currtime()
+    , time = 0
+
+  var raf = _raf || function(fn, el) {
+    setTimeout(fn, fps)
+  }
+
+  limit = arguments.length > 2 ? +limit + 1 : 2
+
+  function loop() {
+    raf(loop, element || null)
+
+    var now = currtime()
+    var dt = now - last
+    var n = limit
+
+    emitter.emit('data', dt)
+    time += dt
+    while (time > fps && n) {
+      time -= fps
+      n -= 1
+      emitter.emit('tick', fps)
+    }
+
+    time = (time + fps * 1000) % fps
+    if (n !== limit) emitter.emit('draw', time / fps)
+    last = now
+  }
+
+  loop()
+
+  return emitter
+}
+
+}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{"events":3}],5:[function(require,module,exports){
 //     Underscore.js 1.8.3
 //     http://underscorejs.org
 //     (c) 2009-2015 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors
@@ -1972,5 +2286,1055 @@ exports.Vector = Vector;
     });
   }
 }.call(this));
+
+},{}],6:[function(require,module,exports){
+exports = module.exports = Victor;
+
+/**
+ * # Victor - A JavaScript 2D vector class with methods for common vector operations
+ */
+
+/**
+ * Constructor. Will also work without the `new` keyword
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(100, 50);
+ *     var vec2 = Victor(42, 1337);
+ *
+ * @param {Number} x Value of the x axis
+ * @param {Number} y Value of the y axis
+ * @return {Victor}
+ * @api public
+ */
+function Victor (x, y) {
+	if (!(this instanceof Victor)) {
+		return new Victor(x, y);
+	}
+
+	/**
+	 * The X axis
+	 *
+	 * ### Examples:
+	 *     var vec = new Victor.fromArray(42, 21);
+	 *
+	 *     vec.x;
+	 *     // => 42
+	 *
+	 * @api public
+	 */
+	this.x = x || 0;
+
+	/**
+	 * The Y axis
+	 *
+	 * ### Examples:
+	 *     var vec = new Victor.fromArray(42, 21);
+	 *
+	 *     vec.y;
+	 *     // => 21
+	 *
+	 * @api public
+	 */
+	this.y = y || 0;
+};
+
+/**
+ * # Static
+ */
+
+/**
+ * Creates a new instance from an array
+ *
+ * ### Examples:
+ *     var vec = Victor.fromArray([42, 21]);
+ *
+ *     vec.toString();
+ *     // => x:42, y:21
+ *
+ * @name Victor.fromArray
+ * @param {Array} array Array with the x and y values at index 0 and 1 respectively
+ * @return {Victor} The new instance
+ * @api public
+ */
+Victor.fromArray = function (arr) {
+	return new Victor(arr[0] || 0, arr[1] || 0);
+};
+
+/**
+ * Creates a new instance from an object
+ *
+ * ### Examples:
+ *     var vec = Victor.fromObject({ x: 42, y: 21 });
+ *
+ *     vec.toString();
+ *     // => x:42, y:21
+ *
+ * @name Victor.fromObject
+ * @param {Object} obj Object with the values for x and y
+ * @return {Victor} The new instance
+ * @api public
+ */
+Victor.fromObject = function (obj) {
+	return new Victor(obj.x || 0, obj.y || 0);
+};
+
+/**
+ * # Manipulation
+ *
+ * These functions are chainable.
+ */
+
+/**
+ * Adds another vector's X axis to this one
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(10, 10);
+ *     var vec2 = new Victor(20, 30);
+ *
+ *     vec1.addX(vec2);
+ *     vec1.toString();
+ *     // => x:30, y:10
+ *
+ * @param {Victor} vector The other vector you want to add to this one
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.addX = function (vec) {
+	this.x += vec.x;
+	return this;
+};
+
+/**
+ * Adds another vector's Y axis to this one
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(10, 10);
+ *     var vec2 = new Victor(20, 30);
+ *
+ *     vec1.addY(vec2);
+ *     vec1.toString();
+ *     // => x:10, y:40
+ *
+ * @param {Victor} vector The other vector you want to add to this one
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.addY = function (vec) {
+	this.y += vec.y;
+	return this;
+};
+
+/**
+ * Adds another vector to this one
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(10, 10);
+ *     var vec2 = new Victor(20, 30);
+ *
+ *     vec1.add(vec2);
+ *     vec1.toString();
+ *     // => x:30, y:40
+ *
+ * @param {Victor} vector The other vector you want to add to this one
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.add = function (vec) {
+	this.x += vec.x;
+	this.y += vec.y;
+	return this;
+};
+
+/**
+ * Subtracts the X axis of another vector from this one
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(100, 50);
+ *     var vec2 = new Victor(20, 30);
+ *
+ *     vec1.subtractX(vec2);
+ *     vec1.toString();
+ *     // => x:80, y:50
+ *
+ * @param {Victor} vector The other vector you want subtract from this one
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.subtractX = function (vec) {
+	this.x -= vec.x;
+	return this;
+};
+
+/**
+ * Subtracts the Y axis of another vector from this one
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(100, 50);
+ *     var vec2 = new Victor(20, 30);
+ *
+ *     vec1.subtractY(vec2);
+ *     vec1.toString();
+ *     // => x:100, y:20
+ *
+ * @param {Victor} vector The other vector you want subtract from this one
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.subtractY = function (vec) {
+	this.y -= vec.y;
+	return this;
+};
+
+/**
+ * Subtracts another vector from this one
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(100, 50);
+ *     var vec2 = new Victor(20, 30);
+ *
+ *     vec1.subtract(vec2);
+ *     vec1.toString();
+ *     // => x:80, y:20
+ *
+ * @param {Victor} vector The other vector you want subtract from this one
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.subtract = function (vec) {
+	this.x -= vec.x;
+	this.y -= vec.y;
+	return this;
+};
+
+/**
+ * Divides the X axis by the x component of given vector
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 50);
+ *     var vec2 = new Victor(2, 0);
+ *
+ *     vec.divideX(vec2);
+ *     vec.toString();
+ *     // => x:50, y:50
+ *
+ * @param {Victor} vector The other vector you want divide by
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.divideX = function (vector) {
+	this.x /= vector.x;
+	return this;
+};
+
+/**
+ * Divides the Y axis by the y component of given vector
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 50);
+ *     var vec2 = new Victor(0, 2);
+ *
+ *     vec.divideY(vec2);
+ *     vec.toString();
+ *     // => x:100, y:25
+ *
+ * @param {Victor} vector The other vector you want divide by
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.divideY = function (vector) {
+	this.y /= vector.y;
+	return this;
+};
+
+/**
+ * Divides both vector axis by a axis values of given vector
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 50);
+ *     var vec2 = new Victor(2, 2);
+ *
+ *     vec.divide(vec2);
+ *     vec.toString();
+ *     // => x:50, y:25
+ *
+ * @param {Victor} vector The vector to divide by
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.divide = function (vector) {
+	this.x /= vector.x;
+	this.y /= vector.y;
+	return this;
+};
+
+/**
+ * Inverts the X axis
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 50);
+ *
+ *     vec.invertX();
+ *     vec.toString();
+ *     // => x:-100, y:50
+ *
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.invertX = function () {
+	this.x *= -1;
+	return this;
+};
+
+/**
+ * Inverts the Y axis
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 50);
+ *
+ *     vec.invertY();
+ *     vec.toString();
+ *     // => x:100, y:-50
+ *
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.invertY = function () {
+	this.y *= -1;
+	return this;
+};
+
+/**
+ * Inverts both axis
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 50);
+ *
+ *     vec.invert();
+ *     vec.toString();
+ *     // => x:-100, y:-50
+ *
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.invert = function () {
+	this.invertX();
+	this.invertY();
+	return this;
+};
+
+/**
+ * Multiplies the X axis by X component of given vector
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 50);
+ *     var vec2 = new Victor(2, 0);
+ *
+ *     vec.multiplyX(vec2);
+ *     vec.toString();
+ *     // => x:200, y:50
+ *
+ * @param {Victor} vector The vector to multiply the axis with
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.multiplyX = function (vector) {
+	this.x *= vector.x;
+	return this;
+};
+
+/**
+ * Multiplies the Y axis by Y component of given vector
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 50);
+ *     var vec2 = new Victor(0, 2);
+ *
+ *     vec.multiplyX(vec2);
+ *     vec.toString();
+ *     // => x:100, y:100
+ *
+ * @param {Victor} vector The vector to multiply the axis with
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.multiplyY = function (vector) {
+	this.y *= vector.y;
+	return this;
+};
+
+/**
+ * Multiplies both vector axis by values from a given vector
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 50);
+ *     var vec2 = new Victor(2, 2);
+ *
+ *     vec.multiply(vec2);
+ *     vec.toString();
+ *     // => x:200, y:100
+ *
+ * @param {Victor} vector The vector to multiply by
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.multiply = function (vector) {
+	this.x *= vector.x;
+	this.y *= vector.y;
+	return this;
+};
+
+/**
+ * Normalize
+ *
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.normalize = function () {
+	var length = this.length();
+
+	if (length === 0) {
+		this.x = 1;
+		this.y = 0;
+	} else {
+		this.divide(Victor(length, length));
+	}
+	return this;
+};
+
+Victor.prototype.norm = Victor.prototype.normalize;
+
+/**
+ * If the absolute vector axis is greater than `max`, multiplies the axis by `factor`
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 50);
+ *
+ *     vec.limit(80, 0.9);
+ *     vec.toString();
+ *     // => x:90, y:50
+ *
+ * @param {Number} max The maximum value for both x and y axis
+ * @param {Number} factor Factor by which the axis are to be multiplied with
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.limit = function (max, factor) {
+	if (Math.abs(this.x) > max){ this.x *= factor; }
+	if (Math.abs(this.y) > max){ this.y *= factor; }
+	return this;
+};
+
+/**
+ * Randomizes both vector axis with a value between 2 vectors
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 50);
+ *
+ *     vec.randomize(new Victor(50, 60), new Victor(70, 80`));
+ *     vec.toString();
+ *     // => x:67, y:73
+ *
+ * @param {Victor} topLeft first vector
+ * @param {Victor} bottomRight second vector
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.randomize = function (topLeft, bottomRight) {
+	this.randomizeX(topLeft, bottomRight);
+	this.randomizeY(topLeft, bottomRight);
+
+	return this;
+};
+
+/**
+ * Randomizes the y axis with a value between 2 vectors
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 50);
+ *
+ *     vec.randomizeX(new Victor(50, 60), new Victor(70, 80`));
+ *     vec.toString();
+ *     // => x:55, y:50
+ *
+ * @param {Victor} topLeft first vector
+ * @param {Victor} bottomRight second vector
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.randomizeX = function (topLeft, bottomRight) {
+	var min = Math.min(topLeft.x, bottomRight.x);
+	var max = Math.max(topLeft.x, bottomRight.x);
+	this.x = random(min, max);
+	return this;
+};
+
+/**
+ * Randomizes the y axis with a value between 2 vectors
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 50);
+ *
+ *     vec.randomizeY(new Victor(50, 60), new Victor(70, 80`));
+ *     vec.toString();
+ *     // => x:100, y:66
+ *
+ * @param {Victor} topLeft first vector
+ * @param {Victor} bottomRight second vector
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.randomizeY = function (topLeft, bottomRight) {
+	var min = Math.min(topLeft.y, bottomRight.y);
+	var max = Math.max(topLeft.y, bottomRight.y);
+	this.y = random(min, max);
+	return this;
+};
+
+/**
+ * Randomly randomizes either axis between 2 vectors
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 50);
+ *
+ *     vec.randomizeAny(new Victor(50, 60), new Victor(70, 80));
+ *     vec.toString();
+ *     // => x:100, y:77
+ *
+ * @param {Victor} topLeft first vector
+ * @param {Victor} bottomRight second vector
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.randomizeAny = function (topLeft, bottomRight) {
+	if (!! Math.round(Math.random())) {
+		this.randomizeX(topLeft, bottomRight);
+	} else {
+		this.randomizeY(topLeft, bottomRight);
+	}
+	return this;
+};
+
+/**
+ * Rounds both axis to an integer value
+ *
+ * ### Examples:
+ *     var vec = new Victor(100.2, 50.9);
+ *
+ *     vec.unfloat();
+ *     vec.toString();
+ *     // => x:100, y:51
+ *
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.unfloat = function () {
+	this.x = Math.round(this.x);
+	this.y = Math.round(this.y);
+	return this;
+};
+
+/**
+ * Performs a linear blend / interpolation of the X axis towards another vector
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(100, 100);
+ *     var vec2 = new Victor(200, 200);
+ *
+ *     vec1.mixX(vec2, 0.5);
+ *     vec.toString();
+ *     // => x:150, y:100
+ *
+ * @param {Victor} vector The other vector
+ * @param {Number} amount The blend amount (optional, default: 0.5)
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.mixX = function (vec, amount) {
+	if (typeof amount === 'undefined') {
+		amount = 0.5;
+	}
+
+	this.x = (1 - amount) * this.x + amount * vec.x;
+	return this;
+};
+
+/**
+ * Performs a linear blend / interpolation of the Y axis towards another vector
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(100, 100);
+ *     var vec2 = new Victor(200, 200);
+ *
+ *     vec1.mixY(vec2, 0.5);
+ *     vec.toString();
+ *     // => x:100, y:150
+ *
+ * @param {Victor} vector The other vector
+ * @param {Number} amount The blend amount (optional, default: 0.5)
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.mixY = function (vec, amount) {
+	if (typeof amount === 'undefined') {
+		amount = 0.5;
+	}
+
+	this.y = (1 - amount) * this.y + amount * vec.y;
+	return this;
+};
+
+/**
+ * Performs a linear blend / interpolation towards another vector
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(100, 100);
+ *     var vec2 = new Victor(200, 200);
+ *
+ *     vec1.mix(vec2, 0.5);
+ *     vec.toString();
+ *     // => x:150, y:150
+ *
+ * @param {Victor} vector The other vector
+ * @param {Number} amount The blend amount (optional, default: 0.5)
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.mix = function (vec, amount) {
+	this.mixX(vec, amount);
+	this.mixY(vec, amount);
+	return this;
+};
+
+/**
+ * # Products
+ */
+
+/**
+ * Creates a clone of this vector
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(10, 10);
+ *     var vec2 = vec1.clone();
+ *
+ *     vec2.toString();
+ *     // => x:10, y:10
+ *
+ * @return {Victor} A clone of the vector
+ * @api public
+ */
+Victor.prototype.clone = function () {
+	return new Victor(this.x, this.y);
+};
+
+/**
+ * Copies another vector's X component in to its own
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(10, 10);
+ *     var vec2 = new Victor(20, 20);
+ *     var vec2 = vec1.copyX(vec1);
+ *
+ *     vec2.toString();
+ *     // => x:20, y:10
+ *
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.copyX = function (vec) {
+	this.x = vec.x;
+	return this;
+};
+
+/**
+ * Copies another vector's Y component in to its own
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(10, 10);
+ *     var vec2 = new Victor(20, 20);
+ *     var vec2 = vec1.copyY(vec1);
+ *
+ *     vec2.toString();
+ *     // => x:10, y:20
+ *
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.copyY = function (vec) {
+	this.y = vec.y;
+	return this;
+};
+
+/**
+ * Copies another vector's X and Y components in to its own
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(10, 10);
+ *     var vec2 = new Victor(20, 20);
+ *     var vec2 = vec1.copy(vec1);
+ *
+ *     vec2.toString();
+ *     // => x:20, y:20
+ *
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.copy = function (vec) {
+	this.copyX(vec);
+	this.copyY(vec);
+	return this;
+};
+
+/**
+ * Sets the vector to zero (0,0)
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(10, 10);
+ *		 var1.zero();
+ *     vec1.toString();
+ *     // => x:0, y:0
+ *
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.zero = function () {
+	this.x = this.y = 0;
+	return this;
+};
+
+/**
+ * Calculates the dot product of this vector and another
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(100, 50);
+ *     var vec2 = new Victor(200, 60);
+ *
+ *     vec1.dot(vec2);
+ *     // => 23000
+ *
+ * @param {Victor} vector The second vector
+ * @return {Number} Dot product
+ * @api public
+ */
+Victor.prototype.dot = function (vec2) {
+	return this.x * vec2.x + this.y * vec2.y;
+};
+
+Victor.prototype.cross = function (vec2) {
+	return (this.x * vec2.y ) - (this.y * vec2.x );
+};
+
+/**
+ * Projects a vector onto another vector, setting itself to the result.
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 0);
+ *     var vec2 = new Victor(100, 100);
+ *
+ *     vec.projectOnto(vec2);
+ *     vec.toString();
+ *     // => x:50, y:50
+ *
+ * @param {Victor} vector The other vector you want to project this vector onto
+ * @return {Victor} `this` for chaining capabilities
+ * @api public
+ */
+Victor.prototype.projectOnto = function (vec2) {
+    var coeff = ( (this.x * vec2.x)+(this.y * vec2.y) ) / ((vec2.x*vec2.x)+(vec2.y*vec2.y));
+    this.x = coeff * vec2.x;
+    this.y = coeff * vec2.y;
+    return this;
+};
+
+
+Victor.prototype.horizontalAngle = function () {
+	return Math.atan2(this.y, this.x);
+};
+
+Victor.prototype.horizontalAngleDeg = function () {
+	return radian2degrees(this.horizontalAngle());
+};
+
+Victor.prototype.verticalAngle = function () {
+	return Math.atan2(this.x, this.y);
+};
+
+Victor.prototype.verticalAngleDeg = function () {
+	return radian2degrees(this.verticalAngle());
+};
+
+Victor.prototype.angle = Victor.prototype.horizontalAngle;
+Victor.prototype.angleDeg = Victor.prototype.horizontalAngleDeg;
+Victor.prototype.direction = Victor.prototype.horizontalAngle;
+
+Victor.prototype.rotate = function (angle) {
+	var nx = (this.x * Math.cos(angle)) - (this.y * Math.sin(angle));
+	var ny = (this.x * Math.sin(angle)) + (this.y * Math.cos(angle));
+
+	this.x = nx;
+	this.y = ny;
+
+	return this;
+};
+
+Victor.prototype.rotateDeg = function (angle) {
+	angle = degrees2radian(angle);
+	return this.rotate(angle);
+};
+
+Victor.prototype.rotateBy = function (rotation) {
+	var angle = this.angle() + rotation;
+
+	return this.rotate(angle);
+};
+
+Victor.prototype.rotateByDeg = function (rotation) {
+	rotation = degrees2radian(rotation);
+	return this.rotateBy(rotation);
+};
+
+/**
+ * Calculates the distance of the X axis between this vector and another
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(100, 50);
+ *     var vec2 = new Victor(200, 60);
+ *
+ *     vec1.distanceX(vec2);
+ *     // => -100
+ *
+ * @param {Victor} vector The second vector
+ * @return {Number} Distance
+ * @api public
+ */
+Victor.prototype.distanceX = function (vec) {
+	return this.x - vec.x;
+};
+
+/**
+ * Same as `distanceX()` but always returns an absolute number
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(100, 50);
+ *     var vec2 = new Victor(200, 60);
+ *
+ *     vec1.absDistanceX(vec2);
+ *     // => 100
+ *
+ * @param {Victor} vector The second vector
+ * @return {Number} Absolute distance
+ * @api public
+ */
+Victor.prototype.absDistanceX = function (vec) {
+	return Math.abs(this.distanceX(vec));
+};
+
+/**
+ * Calculates the distance of the Y axis between this vector and another
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(100, 50);
+ *     var vec2 = new Victor(200, 60);
+ *
+ *     vec1.distanceY(vec2);
+ *     // => -10
+ *
+ * @param {Victor} vector The second vector
+ * @return {Number} Distance
+ * @api public
+ */
+Victor.prototype.distanceY = function (vec) {
+	return this.y - vec.y;
+};
+
+/**
+ * Same as `distanceY()` but always returns an absolute number
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(100, 50);
+ *     var vec2 = new Victor(200, 60);
+ *
+ *     vec1.distanceY(vec2);
+ *     // => 10
+ *
+ * @param {Victor} vector The second vector
+ * @return {Number} Absolute distance
+ * @api public
+ */
+Victor.prototype.absDistanceY = function (vec) {
+	return Math.abs(this.distanceY(vec));
+};
+
+/**
+ * Calculates the euclidean distance between this vector and another
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(100, 50);
+ *     var vec2 = new Victor(200, 60);
+ *
+ *     vec1.distance(vec2);
+ *     // => 100.4987562112089
+ *
+ * @param {Victor} vector The second vector
+ * @return {Number} Distance
+ * @api public
+ */
+Victor.prototype.distance = function (vec) {
+	return Math.sqrt(this.distanceSq(vec));
+};
+
+/**
+ * Calculates the squared euclidean distance between this vector and another
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(100, 50);
+ *     var vec2 = new Victor(200, 60);
+ *
+ *     vec1.distanceSq(vec2);
+ *     // => 10100
+ *
+ * @param {Victor} vector The second vector
+ * @return {Number} Distance
+ * @api public
+ */
+Victor.prototype.distanceSq = function (vec) {
+	var dx = this.distanceX(vec),
+		dy = this.distanceY(vec);
+
+	return dx * dx + dy * dy;
+};
+
+/**
+ * Calculates the length or magnitude of the vector
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 50);
+ *
+ *     vec.length();
+ *     // => 111.80339887498948
+ *
+ * @return {Number} Length / Magnitude
+ * @api public
+ */
+Victor.prototype.length = function () {
+	return Math.sqrt(this.lengthSq());
+};
+
+/**
+ * Squared length / magnitude
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 50);
+ *
+ *     vec.lengthSq();
+ *     // => 12500
+ *
+ * @return {Number} Length / Magnitude
+ * @api public
+ */
+Victor.prototype.lengthSq = function () {
+	return this.x * this.x + this.y * this.y;
+};
+
+Victor.prototype.magnitude = Victor.prototype.length;
+
+/**
+ * Returns a true if vector is (0, 0)
+ *
+ * ### Examples:
+ *     var vec = new Victor(100, 50);
+ *     vec.zero();
+ *
+ *     // => true
+ *
+ * @return {Boolean}
+ * @api public
+ */
+Victor.prototype.isZero = function() {
+	return this.x === 0 && this.y === 0;
+};
+
+/**
+ * Returns a true if this vector is the same as another
+ *
+ * ### Examples:
+ *     var vec1 = new Victor(100, 50);
+ *     var vec2 = new Victor(100, 50);
+ *     vec1.isEqualTo(vec2);
+ *
+ *     // => true
+ *
+ * @return {Boolean}
+ * @api public
+ */
+Victor.prototype.isEqualTo = function(vec2) {
+	return this.x === vec2.x && this.y === vec2.y;
+};
+
+/**
+ * # Utility Methods
+ */
+
+/**
+ * Returns an string representation of the vector
+ *
+ * ### Examples:
+ *     var vec = new Victor(10, 20);
+ *
+ *     vec.toString();
+ *     // => x:10, y:20
+ *
+ * @return {String}
+ * @api public
+ */
+Victor.prototype.toString = function () {
+	return 'x:' + this.x + ', y:' + this.y;
+};
+
+/**
+ * Returns an array representation of the vector
+ *
+ * ### Examples:
+ *     var vec = new Victor(10, 20);
+ *
+ *     vec.toArray();
+ *     // => [10, 20]
+ *
+ * @return {Array}
+ * @api public
+ */
+Victor.prototype.toArray = function () {
+	return [ this.x, this.y ];
+};
+
+/**
+ * Returns an object representation of the vector
+ *
+ * ### Examples:
+ *     var vec = new Victor(10, 20);
+ *
+ *     vec.toObject();
+ *     // => { x: 10, y: 20 }
+ *
+ * @return {Object}
+ * @api public
+ */
+Victor.prototype.toObject = function () {
+	return { x: this.x, y: this.y };
+};
+
+
+var degrees = 180 / Math.PI;
+
+function random (min, max) {
+    return Math.floor(Math.random() * (max - min + 1) + min);
+}
+
+function radian2degrees (rad) {
+	return rad * degrees;
+}
+
+function degrees2radian (deg) {
+	return deg / degrees;
+}
 
 },{}]},{},[1]);
