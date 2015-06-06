@@ -28,13 +28,13 @@ var Simulation = function(canvasId, options) {
     width: cvs.width,
 
     // Number of BoidsSim
-    boidCount: 100,
+    boidCount: 10,
 
     // Simulation variables
     // TODO: Be more specific
     safeDistance: 50,
     safeDistanceRepel: 1,
-    maxVelocity: 5,
+    maxVelocity: 2,
     percentToCenter: 1/100,
     percentToGoal: 1/5,
     borderBuffer: 20,

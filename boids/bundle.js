@@ -29,13 +29,13 @@ var Simulation = function(canvasId, options) {
     width: cvs.width,
 
     // Number of BoidsSim
-    boidCount: 100,
+    boidCount: 10,
 
     // Simulation variables
     // TODO: Be more specific
     safeDistance: 50,
     safeDistanceRepel: 1,
-    maxVelocity: 5,
+    maxVelocity: 2,
     percentToCenter: 1/100,
     percentToGoal: 1/5,
     borderBuffer: 20,
@@ -152,7 +152,7 @@ var Boids = function(config) {
     for (var i=0; i<boids.length; i++) {
 
       /**
-       * Center of Mass rule
+       * Cohesion
        *
        * Subtracts the boid's location, divided by the total number of boids,
        * from the average center of mass
@@ -160,8 +160,8 @@ var Boids = function(config) {
 
       // Find the boid's contribution to the total average
       var weightedBoidLocation = {
-        x: boids[i].location.x / boids.length,
-        y: boids[i].location.x / boids.length
+        x: boids[i].location.x / boids.length - 1,
+        y: boids[i].location.y / boids.length - 1
       };
 
       // Find the total center without the boid's location
@@ -177,7 +177,7 @@ var Boids = function(config) {
 
 
       /**
-       * Match Velocity rule
+       * Alignment
        *
        * Subtracts the boid's velocity, divided by the total number of boids,
        * from the average velocity
@@ -185,8 +185,8 @@ var Boids = function(config) {
 
       // Find the boid's contribution to the total average
       var weightedBoidVelocity = {
-        x: boids[i].velocity.x / boids.length,
-        y: boids[i].velocity.y / boids.length
+        x: boids[i].velocity.x / boids.length - 1,
+        y: boids[i].velocity.y / boids.length - 1
       };
 
       // Find the average velocity without the boids contribution
@@ -202,7 +202,7 @@ var Boids = function(config) {
 
 
       /**
-       * Safe Distance rule
+       * Separation
        *
        * Each boid calculates its distance to each other boid after it.
        * If the distance is less than the safe distance, it applies the doubling
@@ -293,8 +293,8 @@ var Boids = function(config) {
       total.add(b.location);
     });
 
-    total.x /= boids.length;
-    total.y /= boids.length;
+    total.x /= boids.length - 1;
+    total.y /= boids.length - 1;
 
     return total;
   }
@@ -310,8 +310,8 @@ var Boids = function(config) {
       total.add(b.velocity);
     });
 
-    total.x /= boids.length;
-    total.y /= boids.length;
+    total.x /= boids.length - 1;
+    total.y /= boids.length - 1;
 
     return total;
   }
@@ -372,7 +372,7 @@ var Boids = function(config) {
     // Moves all the boids to the next location returns the boid array
     next: next
   }
-}
+};
 
 module.exports = Boids;
 },{"underscore":5,"victor":6}],3:[function(require,module,exports){
