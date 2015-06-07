@@ -29,17 +29,17 @@ var Simulation = function(canvasId, options) {
     width: cvs.width,
 
     // Number of BoidsSim
-    boidCount: 10,
+    boidCount: 500,
 
     // Simulation variables
     // TODO: Be more specific
-    safeDistance: 50,
-    safeDistanceRepel: 1,
-    maxVelocity: 2,
+    neighborRadius: 40,
+    safeDistance: 15,
+    safeDistanceRepel: 0.5,
+    maxVelocity: 3,
     percentToCenter: 1/100,
     percentToGoal: 1/5,
-    borderBuffer: 20,
-    velocityAdded: 1/20
+    velocityAdded: 1/8
   };
 
 
@@ -92,6 +92,7 @@ var options = {};
 
 // Initialize and start a new simulation
 var sim = new Simulation('canvas', options);
+
 },{"./boids":2,"ticker":4,"underscore":5}],2:[function(require,module,exports){
 /**
  * Boids Algorithm
@@ -125,13 +126,7 @@ var Boids = function(config) {
 
   // Store for more efficient distance comparisons
   var squaredSafeDistance = Math.pow(config.safeDistance, 2);
-
-  // Resets the mouse location.  This is used as the goal.
-  var mouseLocation = new Victor();
-  window.onmousemove = function(e) {
-    mouseLocation.x = e.x;
-    mouseLocation.y = e.y;
-  };
+  var squaredNeighborRadius = Math.pow(config.neighborRadius, 2);
 
 
   /**
@@ -144,61 +139,32 @@ var Boids = function(config) {
     var movements = new Array(boids.length);
     for (var m=0; m<movements.length; m++) { movements[m] = new Victor(); }
 
-    // Find the average center of mass and velocity for all boids
-    var totalAvgCenter = centerOfMass();
-    var totalAvgVelocity = averageVelocity();
+    // Stores an array of indices of the boid's neighbors within a given radius
+    var neighbors = new Array(boids.length);
+    for (var n=0; n<boids.length; n++) { neighbors[n] = []; }
+
+    // Find each boids neighbors
+    for (var i=0; i<boids.length; i++) {
+      for (var j=1; j<boids.length; j++) {
+        if (boids[i].location.distanceSq(boids[j].location) <= squaredNeighborRadius) {
+          neighbors[i].push(j);
+          neighbors[j].push(i);
+        }
+      }
+    }
 
     // Loops through the boid indices
-    for (var i=0; i<boids.length; i++) {
+    for (i=0; i<boids.length; i++) {
 
       /**
        * Cohesion
-       *
-       * Subtracts the boid's location, divided by the total number of boids,
-       * from the average center of mass
        */
-
-      // Find the boid's contribution to the total average
-      var weightedBoidLocation = {
-        x: boids[i].location.x / boids.length - 1,
-        y: boids[i].location.y / boids.length - 1
-      };
-
-      // Find the total center without the boid's location
-      var adjustedAvgCenter = totalAvgCenter.clone().subtract(weightedBoidLocation);
-
-      // Find the distances to the center
-      var dx = adjustedAvgCenter.x - weightedBoidLocation.x;
-      var dy = adjustedAvgCenter.y - weightedBoidLocation.y;
-
-      // Add a certain percentage of that distance to the next movement
-      var toCenter = new Victor(dx * config.percentToCenter, dy * config.percentToCenter);
-      movements[i].add(toCenter);
-
+      movements[i].add(cohesion(boids[i], neighbors[i]));
 
       /**
        * Alignment
-       *
-       * Subtracts the boid's velocity, divided by the total number of boids,
-       * from the average velocity
        */
-
-      // Find the boid's contribution to the total average
-      var weightedBoidVelocity = {
-        x: boids[i].velocity.x / boids.length - 1,
-        y: boids[i].velocity.y / boids.length - 1
-      };
-
-      // Find the average velocity without the boids contribution
-      var adjustedAvgVelocity = totalAvgVelocity.clone().subtract(weightedBoidVelocity);
-
-      // Find the 'distance' towards the average
-      dx = adjustedAvgVelocity.x - weightedBoidVelocity.x;
-      dy = adjustedAvgVelocity.y - weightedBoidVelocity.y;
-
-      // Add a certain percentage of that distance towards the next movement
-      var toAverageVelocity = new Victor(dx * config.velocityAdded, dy * config.velocityAdded);
-      movements[i].add(toAverageVelocity);
+      movements[i].add(alignment(boids[i], neighbors[i]));
 
 
       /**
@@ -208,17 +174,19 @@ var Boids = function(config) {
        * If the distance is less than the safe distance, it applies the doubling
        * rule to both itself and the other boids movement vector.
        */
+
+      // TODO: Only loop through neighbors
       // j will be the index of each boid in boids following i.  Allows it to only check
       // paired distances once
-      for (var j = i + 1; j < boids.length; j++) {
+      for (j = i + 1; j < boids.length; j++) {
 
         // Finds whether the distance between two boids is less than or equal to
         // the safe distance, (squared distances for efficiency)
         if (boids[i].location.distanceSq(boids[j].location) <= squaredSafeDistance) {
 
           // If so, it finds the distances between them (from the perspective of boid i)
-          dx = boids[j].location.x - boids[i].location.x;
-          dy = boids[j].location.y - boids[i].location.y;
+          var dx = boids[j].location.x - boids[i].location.x;
+          var dy = boids[j].location.y - boids[i].location.y;
 
           // Creates difference vector from boid i to boid j, multiplied by a scalar that controls the repulsion factor
           var difference = new Victor(dx * config.safeDistanceRepel, dy * config.safeDistanceRepel);
@@ -228,36 +196,7 @@ var Boids = function(config) {
           movements[j].add(difference);
         }
       }
-
-      /**
-       * Avoid borders
-       */
-      //if (boids[i].location.x <= config.borderBuffer) {
-      //  movements[i].x += (boids[i].location.x);
-      //}
-      //if (boids[i].location.y <= config.borderBuffer) {
-      //  movements[i].y += (boids[i].location.y);
-      //}
-      //if ((config.width - boids[i].location.x) <= config.borderBuffer) {
-      //  movements[i].x -= (config.width - boids[i].location.x);
-      //}
-      //if ((config.height - boids[i].location.y) <= config.borderBuffer) {
-      //  movements[i].y -= (config.height - boids[i].location.y);
-      //}
-
-
-      /**
-       * Move towards the mouse
-       */
-      // Finds the distances to the mouse location
-      dx = mouseLocation.x - boids[i].location.x;
-      dy = mouseLocation.y - boids[i].location.y;
-
-      // Adds a percentage of that distance to the next move
-      var toMouse = new Victor(dx * config.percentToGoal, dy * config.percentToGoal);
-      movements[i].add(toMouse);
     }
-
 
     /**
      * Moves each boid to its next location
@@ -274,46 +213,75 @@ var Boids = function(config) {
 
       // Updates the boid's location
       boids[i].location.add(boids[i].velocity);
+
+      // Wrap borders
+      if (boids[i].location.x < 0) {
+        boids[i].location.x += config.width;
+      }
+      if (boids[i].location.y < 0) {
+        boids[i].location.y += config.height;
+      }
+      if (boids[i].location.x > config.width) {
+        boids[i].location.x -= config.width;
+      }
+      if (boids[i].location.y > config.height) {
+        boids[i].location.y -= config.height;
+      }
     }
 
     return boids;
   }
 
-
   /**
-   * Rule: Boids tend to move towards the center of mass of the other boids
-   *
-   * CenterOfMass finds the average center of mass of all boids.
+   * Cohesion Rule: Boids tend to move towards the center of mass of neighboring boids
    * */
-  function centerOfMass() {
+  function cohesion(boid, neighbors) {
 
     var total = new Victor();
 
-    _.each(boids, function(b) {
-      total.add(b.location);
-    });
+    if (neighbors.length > 0) {
 
-    total.x /= boids.length - 1;
-    total.y /= boids.length - 1;
+      // If there are neighbors, go through each one and sum their locations
+      for (var i=0; i < neighbors.length; i++) {
+        total.add(boids[ neighbors[i] ].location);
+      }
 
-    return total;
+      // Divide by the number of neighbors to find their average location
+      total.x /= neighbors.length;
+      total.y /= neighbors.length;
+
+      // Find the distance between that point and the boid
+      var dx = total.x - boid.location.x;
+      var dy = total.y - boid.location.y;
+
+      return new Victor(dx * config.percentToCenter, dy * config.percentToCenter);
+    } else {
+
+      // If there are no neighbors, return the 'total' victor unchanged from (0, 0).
+      return total;
+    }
   }
 
 
   /**
    * Rule: Boids attempt to match the velocity of the other boids
    * */
-  function averageVelocity() {
+  function alignment(boid, neighbors) {
     var total = new Victor();
 
-    _.each(boids, function (b) {
-      total.add(b.velocity);
-    });
+    if (neighbors.length > 0) {
 
-    total.x /= boids.length - 1;
-    total.y /= boids.length - 1;
+      // If there are neighbors, go through each one and sum their locations
+      for (var i=0; i < neighbors.length; i++) {
+        total.add(boids[ neighbors[i] ].velocity);
+      }
 
-    return total;
+      return new Victor(total.x * config.velocityAdded, total.y * config.velocityAdded);
+    } else {
+
+      // If there are no neighbors, return the 'total' victor unchanged from (0, 0).
+      return total;
+    }
   }
 
 
@@ -354,17 +322,6 @@ var Boids = function(config) {
     return new Victor( vector.x * reductionCoeff, vector.y * reductionCoeff );
   }
 
-
-  /**
-   * Testing suite -- called when on debug mode
-   * */
-
-  function test() {
-    /**
-     * Test the boid creation and rule methods
-     */
-  }
-
   return {
     /**
      * Public API
@@ -375,6 +332,7 @@ var Boids = function(config) {
 };
 
 module.exports = Boids;
+
 },{"underscore":5,"victor":6}],3:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
