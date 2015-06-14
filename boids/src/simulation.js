@@ -13,7 +13,7 @@ var _ = require('underscore');
 /**
  * Simulation Class
  */
-var Simulation = function(canvasId, options) {
+var BoidsSimulation = function(canvasId, options) {
 
 
   // Store a reference to the canvas element
@@ -31,11 +31,11 @@ var Simulation = function(canvasId, options) {
     boidCount: 500,
 
     // Simulation variables
-    // TODO: Be more specific
+    fps: 60,
     neighborRadius: 40,
     safeDistance: 15,
-    safeDistanceRepel: 0.5,
-    maxVelocity: 3,
+    safeDistanceRepel: 1,
+    maxVelocity: 2,
     percentToCenter: 1/100,
     percentToGoal: 1/5,
     velocityAdded: 1/8
@@ -57,7 +57,7 @@ var Simulation = function(canvasId, options) {
   // Contains the array of boids to display on the next draw
   var boids = [];
 
-  ticker(window, 45).on('tick', function() {
+  ticker(window, config.fps).on('tick', function() {
     boids = Boids.next();
   }).on('draw', function() {
     draw(boids);
@@ -72,7 +72,7 @@ var Simulation = function(canvasId, options) {
     ctx.clearRect(0, 0, config.width, config.height);
 
     // Makes the boids black
-    ctx.fillStyle = 'black';
+    ctx.fillStyle = '#000000';
 
     // For each boid, draw a square in its location
     _.each(list, function(b) {
@@ -87,7 +87,17 @@ var Simulation = function(canvasId, options) {
  * Demo
  * */
 
-var options = {};
+window.onload = function() {
 
-// Initialize and start a new simulation
-var sim = new Simulation('canvas', options);
+  // Sets the canvas to be the full screen width
+  var canvas = document.getElementById('canvas');
+  var body = document.getElementsByTagName('body')[0];
+  canvas.setAttribute('height', window.innerHeight - 5);
+  canvas.setAttribute('width', window.innerWidth - 5);
+
+  // Accepts options
+  var options = {};
+
+  // Initialize and start a new simulation
+  BoidsSimulation('canvas', options);
+};
