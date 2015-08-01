@@ -15,7 +15,6 @@ var _ = require('underscore');
  */
 var BoidsSimulation = function(canvasId, options) {
 
-
   // Store a reference to the canvas element
   var cvs = document.getElementById(canvasId);
   var ctx = cvs.getContext('2d');
@@ -40,7 +39,6 @@ var BoidsSimulation = function(canvasId, options) {
     percentToGoal: 1/5,
     velocityAdded: 1/8
   };
-
 
   // Extends the config options
   _.each(options, function(val, key){
@@ -79,7 +77,6 @@ var BoidsSimulation = function(canvasId, options) {
       ctx.fillRect(b.location.x, b.location.y, 3, 3);
     });
   }
-
 };
 
 

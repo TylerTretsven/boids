@@ -8,3 +8,5 @@ gulp.task('browserify', function() {
     .pipe(source('bundle.js'))
     .pipe(gulp.dest('./boids/'));
 });
+
+gulp.task('default', ['browserify']);

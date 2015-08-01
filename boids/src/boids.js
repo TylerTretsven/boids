@@ -10,7 +10,6 @@
 'use strict';
 
 var Victor = require('victor');
-var _ = require('underscore');
 
 /**
  * Boid Class
@@ -21,7 +20,9 @@ var Boid = function(position, velocity) {
 };
 
 /**
- * BoidsSim Simulation class
+ * Boids Simulation class
+ *
+ * @param {object} config - Configuration options
  */
 var Boids = function(config) {
 
@@ -35,6 +36,8 @@ var Boids = function(config) {
 
   /**
    * Moves all of the boids and returns the boid list
+   *
+   * @return {array} boids - Boid array containing next locations
    * */
   function next() {
 
